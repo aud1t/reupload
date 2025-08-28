@@ -106,7 +106,6 @@ func (p *PostgresDB) SaveRows(ctx context.Context, rows []Row) error {
 		return fmt.Errorf("failed to merge from temp table: %w", err)
 	}
 
-	// 4. Если все прошло успешно, коммитим транзакцию.
 	return tx.Commit(ctx)
 }
 
@@ -222,7 +221,6 @@ func CopyTable(fromDSN string, toDSN string, full bool) error {
 }
 
 func main() {
-	// Формат DSN: "postgres://username:password@hostname:port/database_name"
 	const prodDSN = "postgres://postgres:secret@localhost:5433/prod_db"
 	const statsDSN = "postgres://postgres:secret@localhost:5434/stats_db"
 
