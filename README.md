@@ -1,6 +1,3 @@
-# reupload
-Yandex Adnvanced Code Task
-
 # Копирование таблицы `profiles` между серверами PostgreSQL
 
 ## Условие задачи
