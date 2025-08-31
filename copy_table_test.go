@@ -63,100 +63,99 @@ func (m *MockDB) Close() error {
 	return nil
 }
 
-func TestCopyTableLogic_FullCopy(t *testing.T) {
-	sourceDB := NewMockDB()
-	destDB := NewMockDB()
-
-	testData := []Row{
-		{uint64(1), []byte(`{"a": 1}`)},
-		{uint64(2), []byte(`{"b": 2}`)},
-		{uint64(100), []byte(`{"c": 3}`)},
-	}
-	sourceDB.SaveRows(context.Background(), testData)
-
-	err := copyTableLogic(context.Background(), sourceDB, destDB, true)
-
-	if err != nil {
-		t.Fatalf("copyTableLogic failed with error: %v", err)
-	}
-
-	if !reflect.DeepEqual(sourceDB.data, destDB.data) {
-		t.Errorf("Destination DB data does not match source DB data.\nGot: %v\nWant: %v", destDB.data, sourceDB.data)
-	}
-}
-
-func TestCopyTableLogic_IncrementalCopy(t *testing.T) {
-	sourceDB := NewMockDB()
-	destDB := NewMockDB()
-
-	sourceDB.SaveRows(context.Background(), []Row{
-		{uint64(1), []byte(`{"a": 1}`)},
-		{uint64(2), []byte(`{"b": 2}`)},
-		{uint64(3), []byte(`{"c": 3}`)},
-		{uint64(4), []byte(`{"c": 4}`)},
-		{uint64(5), []byte(`{"c": 5}`)},
-		{uint64(6), []byte(`{"c": 6}`)},
-	})
-
-	destDB.SaveRows(context.Background(), []Row{
-		{uint64(1), []byte(`{"a": 1}`)},
-		{uint64(2), []byte(`{"b": 2}`)},
-	})
-
-	err := copyTableLogic(context.Background(), sourceDB, destDB, false)
-
-	if err != nil {
-		t.Fatalf("copyTableLogic failed with error: %v", err)
-	}
-
-	if !reflect.DeepEqual(sourceDB.data, destDB.data) {
-		t.Errorf("Destination DB data does not match source DB data.\nGot: %v\nWant: %v", destDB.data, sourceDB.data)
-	}
-}
-
-func TestCopyTableLogic_IncrementalCopyFull(t *testing.T) {
-	sourceDB := NewMockDB()
-	destDB := NewMockDB()
-
-	sourceDB.SaveRows(context.Background(), []Row{
-		{uint64(1), []byte(`{"a": 1}`)},
-		{uint64(2), []byte(`{"b": 2}`)},
-		{uint64(3), []byte(`{"c": 3}`)},
-		{uint64(4), []byte(`{"c": 4}`)},
-		{uint64(5), []byte(`{"c": 5}`)},
-		{uint64(6), []byte(`{"c": 6}`)},
-	})
-
-	destDB.SaveRows(context.Background(), []Row{
-		{uint64(3), []byte(`{"c": 3}`)},
-		{uint64(4), []byte(`{"c": 4}`)},
-	})
-
-	err := copyTableLogic(context.Background(), sourceDB, destDB, true)
-
-	if err != nil {
-		t.Fatalf("copyTableLogic failed with error: %v", err)
+func TestCopyTableLogic(t *testing.T) {
+	testCases := []struct {
+		name       string
+		sourceData []Row
+		destData   []Row
+		fullFlag   bool
+		wantData   []Row
+		wantErr    bool
+	}{
+		{
+			name: "Full copy on empty destination",
+			sourceData: []Row{
+				{uint64(1), []byte(`{"a": 1}`)},
+				{uint64(100), []byte(`{"c": 3}`)},
+			},
+			destData: []Row{},
+			fullFlag: true,
+			wantData: []Row{
+				{uint64(1), []byte(`{"a": 1}`)},
+				{uint64(100), []byte(`{"c": 3}`)},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Incremental copy",
+			sourceData: []Row{
+				{uint64(1), []byte(`{}`)},
+				{uint64(2), []byte(`{}`)},
+				{uint64(3), []byte(`{}`)},
+			},
+			destData: []Row{
+				{uint64(1), []byte(`{}`)},
+			},
+			fullFlag: false,
+			wantData: []Row{
+				{uint64(1), []byte(`{}`)},
+				{uint64(2), []byte(`{}`)},
+				{uint64(3), []byte(`{}`)},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Destination is already up to date",
+			sourceData: []Row{
+				{uint64(1), []byte(`{}`)},
+				{uint64(2), []byte(`{}`)},
+			},
+			destData: []Row{
+				{uint64(1), []byte(`{}`)},
+				{uint64(2), []byte(`{}`)},
+			},
+			fullFlag: false,
+			wantData: []Row{
+				{uint64(1), []byte(`{}`)},
+				{uint64(2), []byte(`{}`)},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "Source is empty",
+			sourceData: []Row{},
+			destData: []Row{
+				{uint64(1), []byte(`{}`)},
+			},
+			fullFlag: false,
+			wantData: []Row{
+				{uint64(1), []byte(`{}`)},
+			},
+			wantErr: false,
+		},
 	}
 
-	if !reflect.DeepEqual(sourceDB.data, destDB.data) {
-		t.Errorf("Destination DB data does not match source DB data.\nGot: %v\nWant: %v", destDB.data, sourceDB.data)
-	}
-}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sourceDB := NewMockDB()
+			destDB := NewMockDB()
+			sourceDB.SaveRows(context.Background(), tc.sourceData)
+			destDB.SaveRows(context.Background(), tc.destData)
 
-func TestCopyTableLogic_DestinationAlreadyUpToDate(t *testing.T) {
-	sourceDB := NewMockDB()
-	destDB := NewMockDB()
+			err := copyTableLogic(context.Background(), sourceDB, destDB, tc.fullFlag)
 
-	testData := []Row{
-		{uint64(1), []byte(`{}`)},
-		{uint64(2), []byte(`{}`)},
-	}
-	sourceDB.SaveRows(context.Background(), testData)
-	destDB.SaveRows(context.Background(), testData)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("copyTableLogic() error = %v, wantErr %v", err, tc.wantErr)
+			}
 
-	err := copyTableLogic(context.Background(), sourceDB, destDB, false)
+			wantMap := make(map[uint64]Row)
+			for _, row := range tc.wantData {
+				wantMap[row[0].(uint64)] = row
+			}
 
-	if err != nil {
-		t.Fatalf("copyTableLogic failed with error when it should have done nothing: %v", err)
+			if !reflect.DeepEqual(destDB.data, wantMap) {
+				t.Errorf("Destination DB data mismatch.\nGot:  %v\nWant: %v", destDB.data, wantMap)
+			}
+		})
 	}
 }
