@@ -63,6 +63,27 @@ func (m *MockDB) Close() error {
 	return nil
 }
 
+
+type MockConnector struct {
+	connections map[string]Database
+}
+
+func (m *MockConnector) Connect(ctx context.Context, dbname string) (Database, error) {
+	db, ok := m.connections[dbname]
+	if ok {
+		return db, nil
+	}
+	m.connections[dbname] = NewMockDB()
+	return m.connections[dbname], nil
+}
+
+func NewMockConnector() *MockConnector {
+	return &MockConnector{
+		connections: make(map[string]Database),
+	}
+}
+
+
 func TestCopyTableLogic(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -137,12 +158,14 @@ func TestCopyTableLogic(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			sourceDB := NewMockDB()
-			destDB := NewMockDB()
+			conncetor := NewMockConnector()
+
+			sourceDB, _ := conncetor.Connect(context.Background(), "source_db")
+			destDB, _ := conncetor.Connect(context.Background(), "dest_db")
 			sourceDB.SaveRows(context.Background(), tc.sourceData)
 			destDB.SaveRows(context.Background(), tc.destData)
 
-			err := copyTableLogic(context.Background(), sourceDB, destDB, tc.fullFlag)
+			err := CopyTable(conncetor, "source_db", "dest_db", tc.fullFlag)
 
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("copyTableLogic() error = %v, wantErr %v", err, tc.wantErr)
@@ -153,8 +176,8 @@ func TestCopyTableLogic(t *testing.T) {
 				wantMap[row[0].(uint64)] = row
 			}
 
-			if !reflect.DeepEqual(destDB.data, wantMap) {
-				t.Errorf("Destination DB data mismatch.\nGot:  %v\nWant: %v", destDB.data, wantMap)
+			if !reflect.DeepEqual((destDB.(*MockDB)).data, wantMap) {
+				t.Errorf("Destination DB data mismatch.\nGot:  %v\nWant: %v", (destDB.(*MockDB)).data, wantMap)
 			}
 		})
 	}

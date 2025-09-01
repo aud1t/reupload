@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const batchSize uint64 = 10_000
-
 type Row []interface{}
 
 type Database interface {
@@ -19,12 +17,23 @@ type Database interface {
 	SaveRows(ctx context.Context, rows []Row) error
 }
 
-// Это функция где-то реализована
-func Connect(ctx context.Context, dsn string) (Database, error) {
-	return nil, nil
+type DBConnector interface {
+	Connect(ctx context.Context, dbname string) (Database, error)
 }
 
-func batcher(startID, endID, batchSize uint64) func() (batchStart, batchEnd uint64, ok bool) {
+type PostgresConnector struct {
+}
+
+func (pc *PostgresConnector) Connect(ctx context.Context, dbname string) (Database, error) {
+	return nil, fmt.Errorf("PostgresConnector.Connect function is not implemented for db: %s", dbname)
+}
+
+const (
+	batchSize   uint64 = 10_000
+	copyTimeout        = 24 * time.Hour
+)
+
+func newBatchGenerator(startID, endID, batchSize uint64) func() (start, end uint64, ok bool) {
 	current := startID
 
 	return func() (uint64, uint64, bool) {
@@ -38,16 +47,29 @@ func batcher(startID, endID, batchSize uint64) func() (batchStart, batchEnd uint
 	}
 }
 
-func copyTableLogic(ctx context.Context, fromDB Database, toDB Database, full bool) error {
+func CopyTable(connector DBConnector, fromName string, toName string, full bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), copyTimeout)
+	defer cancel()
+
+	fromDB, err := connector.Connect(ctx, fromName)
+	if err != nil {
+		return fmt.Errorf("failed to connect to source DB %s: %w", fromName, err)
+	}
+	defer fromDB.Close()
+
+	toDB, err := connector.Connect(ctx, toName)
+	if err != nil {
+		return fmt.Errorf("failed to connect to destination DB %s: %w", toName, err)
+	}
+	defer toDB.Close()
+
 	endID, err := fromDB.GetMaxID(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get max ID from source: %w", err)
 	}
 
 	var startID uint64
-	if full {
-		startID = 0
-	} else {
+	if !full {
 		startID, err = toDB.GetMaxID(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to get max ID from destination: %w", err)
@@ -61,9 +83,9 @@ func copyTableLogic(ctx context.Context, fromDB Database, toDB Database, full bo
 		return nil
 	}
 
-	nextBatcher := batcher(startID, endID, batchSize)
+	batchGen := newBatchGenerator(startID, endID, batchSize)
 	for {
-		batchStart, batchEnd, ok := nextBatcher()
+		batchStart, batchEnd, ok := batchGen()
 		if !ok {
 			break
 		}
@@ -85,29 +107,6 @@ func copyTableLogic(ctx context.Context, fromDB Database, toDB Database, full bo
 	return nil
 }
 
-func CopyTable(fromName string, toName string, full bool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
-	defer cancel()
-
-	fromDB, err := Connect(ctx, fromName)
-	if err != nil {
-		return fmt.Errorf("failed to connect to source DB %s: %w", fromName, err)
-	}
-	defer fromDB.Close()
-
-	toDB, err := Connect(ctx, toName)
-	if err != nil {
-		return fmt.Errorf("failed to connect to destination DB %s: %w", toName, err)
-	}
-	defer toDB.Close()
-
-	if err := copyTableLogic(ctx, fromDB, toDB, full); err != nil {
-		return fmt.Errorf("copy process failed: %w", err)
-	}
-
-	return nil
-}
-
 func main() {
 	const prodDSN = "postgres://postgres:secret@localhost:5433/prod_db"
 	const statsDSN = "postgres://postgres:secret@localhost:5434/stats_db"
@@ -117,7 +116,9 @@ func main() {
 
 	fullCopy := false
 
-	if err := CopyTable(prodDSN, statsDSN, fullCopy); err != nil {
+	pgConnector := &PostgresConnector{}
+	err := CopyTable(pgConnector, prodDSN, statsDSN, fullCopy)
+	if err != nil {
 		log.Fatalf("Copy failed: %v", err)
 	}
 }
