@@ -25,6 +25,10 @@ func (m *MockDB) GetMaxID(ctx context.Context) (uint64, error) {
 	return m.maxID.Load(), nil
 }
 
+func (m *MockDB) GetMinID(ctx context.Context) (uint64, error) {
+	return 1, nil
+}
+
 func (m *MockDB) LoadRows(ctx context.Context, minID, maxID uint64) ([]Row, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -63,7 +67,6 @@ func (m *MockDB) Close() error {
 	return nil
 }
 
-
 type MockConnector struct {
 	connections map[string]Database
 }
@@ -83,7 +86,6 @@ func NewMockConnector() *MockConnector {
 	}
 }
 
-
 func TestCopyTableLogic(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -97,13 +99,13 @@ func TestCopyTableLogic(t *testing.T) {
 			name: "Full copy on empty destination",
 			sourceData: []Row{
 				{uint64(1), []byte(`{"a": 1}`)},
-				{uint64(100), []byte(`{"c": 3}`)},
+				{uint64(2), []byte(`{"b": 2}`)},
 			},
 			destData: []Row{},
 			fullFlag: true,
 			wantData: []Row{
 				{uint64(1), []byte(`{"a": 1}`)},
-				{uint64(100), []byte(`{"c": 3}`)},
+				{uint64(2), []byte(`{"b": 2}`)},
 			},
 			wantErr: false,
 		},
@@ -165,7 +167,7 @@ func TestCopyTableLogic(t *testing.T) {
 			sourceDB.SaveRows(context.Background(), tc.sourceData)
 			destDB.SaveRows(context.Background(), tc.destData)
 
-			err := CopyTable(conncetor, "source_db", "dest_db", tc.fullFlag)
+			err := CopyTable(context.Background(), conncetor, "source_db", "dest_db", tc.fullFlag)
 
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("copyTableLogic() error = %v, wantErr %v", err, tc.wantErr)
